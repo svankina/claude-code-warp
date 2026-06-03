@@ -5,6 +5,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/should-use-structured.sh"
 
+# Install warpfork binary and slash command (idempotent, no stdout)
+"$SCRIPT_DIR/install-commands.sh" >/dev/null 2>&1 || true
+
 # Legacy fallback for old Warp versions
 if ! should_use_structured; then
     exec "$SCRIPT_DIR/legacy/on-session-start.sh"

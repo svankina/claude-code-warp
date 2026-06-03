@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fork the current Claude Code session into a new Warp window.
+# Uses the warp://launch/<name> deep-link API — no xdotool, no cursor interference.
+#
+# Usage: warpfork [session-id]
+#   With no argument, walks up the process tree to find the current Claude session.
+#   Pass a session ID explicitly to fork any session by ID.
+
+die() { echo "warpfork: $*" >&2; exit 1; }
+
+# Platform-aware Warp launch configurations directory and open command
+case "$(uname)" in
+    Darwin)
+        LAUNCH_DIR="${HOME}/Library/Application Support/dev.warp.Warp/launch_configurations"
+        OPEN_CMD="open"
+        ;;
+    *)
+        LAUNCH_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/warp-terminal/launch_configurations"
+        OPEN_CMD="xdg-open"
+        ;;
+esac
+
+urlencode() {
+    python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$1"
+}
+
+# --- Resolve session ---
+
+if [ $# -ge 1 ]; then
+    SESSION_ID="$1"
+    CWD="$(pwd)"
+    for f in "${HOME}/.claude/sessions/"*.json; do
+        [ -f "$f" ] || continue
+        id=$(jq -r '.sessionId' "$f" 2>/dev/null)
+        if [ "$id" = "$SESSION_ID" ]; then
+            CWD=$(jq -r '.cwd' "$f")
+            break
+        fi
+    done
+else
+    SESSION_FILE=""
+    pid=$$
+    while [ "$pid" -gt 1 ]; do
+        f="${HOME}/.claude/sessions/$pid.json"
+        if [ -f "$f" ]; then SESSION_FILE="$f"; break; fi
+        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ') || break
+    done
+    [ -n "$SESSION_FILE" ] || SESSION_FILE=$(ls -t "${HOME}/.claude/sessions/"*.json 2>/dev/null | head -1 || true)
+    [ -n "$SESSION_FILE" ] && [ -f "$SESSION_FILE" ] || die "no Claude session found — start a session first"
+    SESSION_ID=$(jq -r '.sessionId' "$SESSION_FILE")
+    CWD=$(jq -r '.cwd' "$SESSION_FILE")
+fi
+
+[ -n "$SESSION_ID" ] && [ "$SESSION_ID" != "null" ] || die "could not read sessionId"
+[ -n "$CWD" ]        && [ "$CWD"        != "null" ] || CWD="${HOME}"
+
+# --- Write launch config ---
+
+CONFIG_NAME="cc-wfork-${SESSION_ID:0:8}"
+mkdir -p "$LAUNCH_DIR"
+CONFIG_FILE="${LAUNCH_DIR}/${CONFIG_NAME}.yaml"
+
+cat > "$CONFIG_FILE" << YAML
+---
+name: ${CONFIG_NAME}
+windows:
+  - tabs:
+      - title: "fork:${SESSION_ID:0:8}"
+        layout:
+          cwd: ${CWD}
+          commands:
+            - exec: claude --resume ${SESSION_ID} --fork-session
+YAML
+
+# --- Open via deep link ---
+
+ENCODED=$(urlencode "$CONFIG_NAME")
+"$OPEN_CMD" "warp://launch/${ENCODED}" 2>/dev/null
+
+# Clean up the config file after Warp has had time to read it
+(sleep 3 && rm -f "$CONFIG_FILE") &
+
+echo "Forked session ${SESSION_ID:0:8} → new Warp window (cwd: ${CWD})"
