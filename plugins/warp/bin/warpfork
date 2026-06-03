@@ -1,85 +1,117 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fork the current Claude Code session into a new Warp window.
-# Uses the warp://launch/<name> deep-link API — no xdotool, no cursor interference.
+# Fork the current Claude Code session into Warp (resumed with --fork-session).
+# Linux only.
 #
-# Usage: warpfork [session-id]
-#   With no argument, walks up the process tree to find the current Claude session.
-#   Pass a session ID explicitly to fork any session by ID.
+# Delivery modes (WARPFORK_MODE), default "auto":
+#   split   Native `warp://action/split_pane` deep link — a true split pane in the
+#           current window. Needs a Warp build that supports the action; set the
+#           URL scheme with WARPFORK_SCHEME (default "warp").
+#   pane    Simulate Warp's split-pane keyboard shortcut (X11 + xdotool). A true
+#           pane; not available under Wayland.
+#   window  New window via `warp://launch/<name>` — always works.
+#   auto    pane if X11 + xdotool/xprop are present; otherwise window.
+#
+# Usage: warpfork [session-id]   (no arg = current session, via process tree)
+# Other env: WARPFORK_SPLIT_KEY (ctrl+shift+d), WARPFORK_DIRECTION (right),
+#   WARPFORK_NAME, WARPFORK_SPLIT_DELAY (0.45), WARPFORK_CHAR_DELAY (12),
+#   WARPFORK_TYPE_DELAY (0.15)
 
 die() { echo "warpfork: $*" >&2; exit 1; }
+command -v jq >/dev/null || die "jq not found (required)"
 
-# Platform-aware Warp launch configurations directory and open command
-case "$(uname)" in
-    Darwin)
-        LAUNCH_DIR="${HOME}/Library/Application Support/dev.warp.Warp/launch_configurations"
-        OPEN_CMD="open"
-        ;;
-    *)
-        LAUNCH_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/warp-terminal/launch_configurations"
-        OPEN_CMD="xdg-open"
-        ;;
-esac
+LAUNCH_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/warp-terminal/launch_configurations"
+urlencode() { python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$1"; }
 
-urlencode() {
-    python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$1"
-}
-
-# --- Resolve session ---
-
+# --- Resolve session id, cwd, and parent name ---
+PARENT_NAME=""
 if [ $# -ge 1 ]; then
-    SESSION_ID="$1"
-    CWD="$(pwd)"
-    for f in "${HOME}/.claude/sessions/"*.json; do
-        [ -f "$f" ] || continue
-        id=$(jq -r '.sessionId' "$f" 2>/dev/null)
-        if [ "$id" = "$SESSION_ID" ]; then
-            CWD=$(jq -r '.cwd' "$f")
-            break
-        fi
-    done
+  SESSION_ID="$1"; CWD="$(pwd)"
+  for f in "${HOME}/.claude/sessions/"*.json; do
+    [ -f "$f" ] || continue
+    [ "$(jq -r '.sessionId' "$f" 2>/dev/null)" = "$SESSION_ID" ] && {
+      CWD=$(jq -r '.cwd' "$f"); PARENT_NAME=$(jq -r '.name // empty' "$f"); break; }
+  done
 else
-    SESSION_FILE=""
-    pid=$$
-    while [ "$pid" -gt 1 ]; do
-        f="${HOME}/.claude/sessions/$pid.json"
-        if [ -f "$f" ]; then SESSION_FILE="$f"; break; fi
-        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ') || break
-    done
-    [ -n "$SESSION_FILE" ] || SESSION_FILE=$(ls -t "${HOME}/.claude/sessions/"*.json 2>/dev/null | head -1 || true)
-    [ -n "$SESSION_FILE" ] && [ -f "$SESSION_FILE" ] || die "no Claude session found — start a session first"
-    SESSION_ID=$(jq -r '.sessionId' "$SESSION_FILE")
-    CWD=$(jq -r '.cwd' "$SESSION_FILE")
+  SESSION_FILE=""; pid=$$
+  while [ "$pid" -gt 1 ]; do
+    f="${HOME}/.claude/sessions/$pid.json"
+    [ -f "$f" ] && { SESSION_FILE="$f"; break; }
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ') || break
+  done
+  [ -n "$SESSION_FILE" ] || SESSION_FILE=$(ls -t "${HOME}/.claude/sessions/"*.json 2>/dev/null | head -1 || true)
+  [ -n "$SESSION_FILE" ] && [ -f "$SESSION_FILE" ] || die "no Claude session found — start a session first"
+  SESSION_ID=$(jq -r '.sessionId' "$SESSION_FILE")
+  CWD=$(jq -r '.cwd' "$SESSION_FILE")
+  PARENT_NAME=$(jq -r '.name // empty' "$SESSION_FILE")
+fi
+[ -n "$SESSION_ID" ] && [ "$SESSION_ID" != "null" ] || die "could not read sessionId"
+[ -n "$CWD" ] && [ "$CWD" != "null" ] || CWD="${HOME}"
+
+# --- Fork display name (collapse repeat-fork suffixes) ---
+if [ -n "${WARPFORK_NAME:-}" ]; then FORK_NAME="$WARPFORK_NAME"
+elif [ -n "$PARENT_NAME" ]; then FORK_NAME="${PARENT_NAME% (fork)} (fork)"
+else FORK_NAME="fork ${SESSION_ID:0:8}"; fi
+
+# Single-quote the name for the shell command (escape embedded quotes).
+QNAME="'${FORK_NAME//\'/\'\\\'\'}'"
+CMD="claude --resume ${SESSION_ID} --fork-session --name ${QNAME}"
+
+# --- Choose mode ---
+have_pane_support() { [ -n "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ] && command -v xdotool >/dev/null && command -v xprop >/dev/null; }
+# auto = reliable new-window for everyone; opt into the xdotool pane with
+# WARPFORK_PANE=1 (X11 power users), or the native deep link with WARPFORK_MODE=split.
+MODE="${WARPFORK_MODE:-auto}"
+if [ "$MODE" = auto ]; then
+  if [ "${WARPFORK_PANE:-}" = 1 ] && have_pane_support; then MODE=pane; else MODE=window; fi
 fi
 
-[ -n "$SESSION_ID" ] && [ "$SESSION_ID" != "null" ] || die "could not read sessionId"
-[ -n "$CWD" ]        && [ "$CWD"        != "null" ] || CWD="${HOME}"
+if [ -n "${WARPFORK_DRY_RUN:-}" ]; then
+  echo "warpfork[dry-run]: mode=$MODE session=${SESSION_ID:0:8} name=\"$FORK_NAME\""
+  echo "  cmd: $CMD"
+  exit 0
+fi
 
-# --- Write launch config ---
+case "$MODE" in
+  split)
+    SCHEME="${WARPFORK_SCHEME:-warp}"
+    DIR="${WARPFORK_DIRECTION:-right}"
+    xdg-open "${SCHEME}://action/split_pane?direction=${DIR}&command=$(urlencode "$CMD")" 2>/dev/null
+    echo "warpfork: split pane (native) → fork ${SESSION_ID:0:8} \"${FORK_NAME}\"" ;;
 
-CONFIG_NAME="cc-wfork-${SESSION_ID:0:8}"
-mkdir -p "$LAUNCH_DIR"
-CONFIG_FILE="${LAUNCH_DIR}/${CONFIG_NAME}.yaml"
+  pane)
+    have_pane_support || die "pane mode needs X11 with xdotool + xprop (try WARPFORK_MODE=window)"
+    SPLIT_KEY="${WARPFORK_SPLIT_KEY:-ctrl+shift+d}"
+    WID=$(xdotool getactivewindow 2>/dev/null) || die "no active X window"
+    xprop -id "$WID" WM_CLASS 2>/dev/null | grep -qi warp || \
+      die "focused window is not Warp — focus Warp and retry (no keystrokes sent)"
+    xdotool windowactivate --sync "$WID" 2>/dev/null || true
+    xdotool key --clearmodifiers "$SPLIT_KEY"
+    sleep "${WARPFORK_SPLIT_DELAY:-0.45}"
+    xdotool type --clearmodifiers --delay "${WARPFORK_CHAR_DELAY:-12}" -- "$CMD"
+    sleep "${WARPFORK_TYPE_DELAY:-0.15}"
+    xdotool key --clearmodifiers Return
+    echo "warpfork: split pane (xdotool) → fork ${SESSION_ID:0:8} \"${FORK_NAME}\"" ;;
 
-cat > "$CONFIG_FILE" << YAML
+  window)
+    CONFIG_NAME="cc-wfork-${SESSION_ID:0:8}"
+    mkdir -p "$LAUNCH_DIR"
+    CONFIG_FILE="${LAUNCH_DIR}/${CONFIG_NAME}.yaml"
+    cat > "$CONFIG_FILE" << YAML
 ---
 name: ${CONFIG_NAME}
 windows:
   - tabs:
-      - title: "fork:${SESSION_ID:0:8}"
+      - title: "${FORK_NAME}"
         layout:
           cwd: ${CWD}
           commands:
-            - exec: claude --resume ${SESSION_ID} --fork-session
+            - exec: ${CMD}
 YAML
+    xdg-open "warp://launch/$(urlencode "$CONFIG_NAME")" 2>/dev/null
+    ( sleep 3 && rm -f "$CONFIG_FILE" ) &
+    echo "warpfork: new window → fork ${SESSION_ID:0:8} \"${FORK_NAME}\" (cwd: ${CWD})" ;;
 
-# --- Open via deep link ---
-
-ENCODED=$(urlencode "$CONFIG_NAME")
-"$OPEN_CMD" "warp://launch/${ENCODED}" 2>/dev/null
-
-# Clean up the config file after Warp has had time to read it
-(sleep 3 && rm -f "$CONFIG_FILE") &
-
-echo "Forked session ${SESSION_ID:0:8} → new Warp window (cwd: ${CWD})"
+  *) die "unknown WARPFORK_MODE '$MODE' (use: auto|split|pane|window)" ;;
+esac

@@ -8,11 +8,11 @@
   "plugins": [
     {
       "name": "warp",
-      "description": "Native Warp notifications when Claude completes tasks or needs input",
+      "description": "Native Warp notifications when Claude completes tasks or needs input, plus /warpfork to fork a session into Warp",
       "source": "./plugins/warp",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "category": "productivity",
-      "tags": ["notifications", "terminal", "warp"]
+      "tags": ["notifications", "terminal", "warp", "warpfork"]
     }
   ]
 }
