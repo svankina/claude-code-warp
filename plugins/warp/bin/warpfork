@@ -89,9 +89,22 @@ case "$MODE" in
     xdotool windowactivate --sync "$WID" 2>/dev/null || true
     xdotool key --clearmodifiers "$SPLIT_KEY"
     sleep "${WARPFORK_SPLIT_DELAY:-0.45}"
-    xdotool type --clearmodifiers --delay "${WARPFORK_CHAR_DELAY:-12}" -- "$CMD"
-    sleep "${WARPFORK_TYPE_DELAY:-0.15}"
-    xdotool key --clearmodifiers Return
+    # Prefer clipboard paste (instant) over char-by-char typing. Falls back to
+    # typing if xclip is missing or WARPFORK_TYPE=1 is set.
+    PASTE_KEY="${WARPFORK_PASTE_KEY:-ctrl+shift+v}"
+    if [ "${WARPFORK_TYPE:-}" != 1 ] && command -v xclip >/dev/null; then
+      OLD_CLIP=$(xclip -selection clipboard -o 2>/dev/null || true)
+      printf '%s' "$CMD" | xclip -selection clipboard
+      xdotool key --clearmodifiers "$PASTE_KEY"
+      sleep "${WARPFORK_PASTE_DELAY:-0.12}"
+      xdotool key --clearmodifiers Return
+      # Restore the prior clipboard once Warp has consumed the paste.
+      ( sleep 0.3; printf '%s' "$OLD_CLIP" | xclip -selection clipboard ) >/dev/null 2>&1 &
+    else
+      xdotool type --clearmodifiers --delay "${WARPFORK_CHAR_DELAY:-12}" -- "$CMD"
+      sleep "${WARPFORK_TYPE_DELAY:-0.15}"
+      xdotool key --clearmodifiers Return
+    fi
     echo "warpfork: split pane (xdotool) → fork ${SESSION_ID:0:8} \"${FORK_NAME}\"" ;;
 
   window)
