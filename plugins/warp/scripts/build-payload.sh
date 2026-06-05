@@ -14,7 +14,8 @@
 # hook's stdin JSON (passed as $1), then merges any extra jq args you pass.
 
 # The current protocol version this plugin knows how to produce.
-PLUGIN_CURRENT_PROTOCOL_VERSION=1
+# v2 adds the `commands` array (advertised slash commands) to session_start.
+PLUGIN_CURRENT_PROTOCOL_VERSION=2
 
 # Negotiate the protocol version with Warp.
 # Uses min(plugin_current, warp_declared), falling back to 1 if Warp doesn't advertise a version.

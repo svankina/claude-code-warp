@@ -37,7 +37,20 @@ fi
 # Read plugin version from plugin.json
 PLUGIN_VERSION=$(jq -r '.version // "unknown"' "$SCRIPT_DIR/../.claude-plugin/plugin.json" 2>/dev/null)
 
+# Advertise the session's slash commands when Warp negotiates protocol v2+.
+# Discovery walks command dirs, so skip the work entirely for older Warp builds
+# that would ignore the field.
+COMMANDS_ARGS=()
+if [ "$(negotiate_protocol_version)" -ge 2 ] 2>/dev/null; then
+    CWD_FOR_COMMANDS=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+    COMMANDS_JSON=$("$SCRIPT_DIR/discover-commands.sh" "${CWD_FOR_COMMANDS:-$PWD}" 2>/dev/null)
+    if [ -n "$COMMANDS_JSON" ]; then
+        COMMANDS_ARGS=(--argjson commands "$COMMANDS_JSON")
+    fi
+fi
+
 # Emit structured notification with plugin version so Warp can track it
 BODY=$(build_payload "$INPUT" "session_start" \
-    --arg plugin_version "$PLUGIN_VERSION")
+    --arg plugin_version "$PLUGIN_VERSION" \
+    "${COMMANDS_ARGS[@]}")
 "$SCRIPT_DIR/warp-notify.sh" "warp://cli-agent" "$BODY"

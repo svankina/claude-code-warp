@@ -128,7 +128,7 @@ assert_json_field "v1 when warp declares 1" "$PAYLOAD" ".v" "1"
 # Warp declares a higher version than the plugin knows → capped to plugin current
 export WARP_CLI_AGENT_PROTOCOL_VERSION=99
 PAYLOAD=$(build_payload '{"session_id":"s1","cwd":"/tmp"}' "stop")
-assert_json_field "capped to plugin current when warp is ahead" "$PAYLOAD" ".v" "1"
+assert_json_field "capped to plugin current when warp is ahead" "$PAYLOAD" ".v" "2"
 
 # Warp declares a lower version than the plugin knows → use warp's version
 # (not testable with PLUGIN_MAX=1 since there's no v0, but we verify the min logic
@@ -286,6 +286,37 @@ for HOOK in on-permission-request.sh on-prompt-submit.sh on-post-tool-use.sh; do
     echo '{}' | bash "$HOOK_DIR/$HOOK" 2>/dev/null
     assert_eq "$HOOK exits 0 without protocol version" "0" "$?"
 done
+
+echo ""
+echo "=== discover-commands.sh ==="
+
+# Built-ins are always present and well-formed.
+CMDS=$("$HOOK_DIR/discover-commands.sh" /nonexistent-project-dir 2>/dev/null)
+assert_eq "output is valid JSON array" "array" "$(echo "$CMDS" | jq -r 'type')"
+assert_eq "includes the /compact built-in" "1" \
+    "$(echo "$CMDS" | jq '[.[] | select(.name == "compact")] | length')"
+assert_eq "compact carries an argument_hint" "[instructions]" \
+    "$(echo "$CMDS" | jq -r '.[] | select(.name == "compact") | .argument_hint')"
+assert_eq "every command has a name" "0" \
+    "$(echo "$CMDS" | jq '[.[] | select(.name == null or .name == "")] | length')"
+assert_eq "names are unique" "0" \
+    "$(echo "$CMDS" | jq '(length) - ([.[].name] | unique | length)')"
+
+# File-based discovery: a project command dir is picked up and namespaced.
+TMP_PROJECT=$(mktemp -d)
+mkdir -p "$TMP_PROJECT/.claude/commands/frontend"
+printf -- '---\ndescription: Deploy the app\nargument-hint: "[env]"\n---\nbody\n' \
+    > "$TMP_PROJECT/.claude/commands/deploy.md"
+printf -- '---\ndescription: Build a component\n---\nbody\n' \
+    > "$TMP_PROJECT/.claude/commands/frontend/component.md"
+CMDS=$("$HOOK_DIR/discover-commands.sh" "$TMP_PROJECT" 2>/dev/null)
+assert_eq "project command discovered" "Deploy the app" \
+    "$(echo "$CMDS" | jq -r '.[] | select(.name == "deploy") | .description')"
+assert_eq "project command argument-hint parsed" "[env]" \
+    "$(echo "$CMDS" | jq -r '.[] | select(.name == "deploy") | .argument_hint')"
+assert_eq "subdir command is namespaced with ':'" "Build a component" \
+    "$(echo "$CMDS" | jq -r '.[] | select(.name == "frontend:component") | .description')"
+rm -rf "$TMP_PROJECT"
 
 # --- Summary ---
 
