@@ -21,6 +21,16 @@ The plugin keeps Warp informed of Claude's current state by emitting structured 
 
 This powers Warp's inline status indicators for Claude Code sessions.
 
+### ⠋ Dynamic Terminal Title
+
+The tab title animates while Claude works, so a glance tells you the session state:
+
+- **Working** — `⠋ project` with an animated braille spinner
+- **Needs you** — `● project` when Claude is waiting on a permission prompt or idle
+- **Done** — plain `project`
+
+Works on any Warp build (it uses plain OSC 0 titles, not the structured protocol). Disable it by setting `WARP_CLAUDE_DYNAMIC_TITLE=0` in your environment.
+
 ## Installation
 
 ```bash
@@ -63,6 +73,8 @@ Older Warp clients that predate the structured notification protocol are still s
 ## Configuration
 
 Notifications work out of the box. To customize Warp's notification behavior (sounds, system notifications, etc.), see [Warp's notification settings](https://docs.warp.dev/features/notifications).
+
+To turn off the animated tab title, export `WARP_CLAUDE_DYNAMIC_TITLE=0` before launching Claude Code.
 
 ## Uninstall
 
