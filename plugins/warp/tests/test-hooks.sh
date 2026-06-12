@@ -525,6 +525,43 @@ assert_eq "permission-request writes attention marker" "0" "$?"
 [ -f "$HOOK_PIDF" ]
 assert_eq "permission-request removes pid file" "1" "$?"
 
+echo ""
+echo "--- Subagent stop is ignored ---"
+
+SUB_TTY="$TITLE_TEST_DIR/sub-tty"
+SUB_PIDF=$(_title_pid_file "hook-title-sub")
+MAIN_INPUT='{"session_id":"hook-title-sub","cwd":"/tmp/proj"}'
+SUB_INPUT='{"session_id":"hook-title-sub","cwd":"/tmp/proj","agent_id":"agent-a1b2c3","agent_type":"general-purpose"}'
+
+# main agent working → spinner running
+echo "$MAIN_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$SUB_TTY" \
+    bash "$HOOK_DIR/on-prompt-submit.sh" >/dev/null 2>&1
+sleep 0.6
+SUB_SPID=$(cat "$SUB_PIDF" 2>/dev/null)
+
+# a subagent's stop (input carries agent_id) emits nothing
+SUB_OUT=$(echo "$SUB_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$SUB_TTY" \
+    WARP_CLI_AGENT_PROTOCOL_VERSION=1 WARP_CLIENT_VERSION="v0.2026.04.01.08.00.stable_00" \
+    CLAUDE_CODE_VERSION="2.1.141" bash "$HOOK_DIR/on-stop.sh" 2>/dev/null)
+assert_eq "subagent stop emits no notification" "" "$SUB_OUT"
+[ -n "$SUB_SPID" ] && kill -0 "$SUB_SPID" 2>/dev/null
+assert_eq "subagent stop leaves the spinner running" "0" "$?"
+
+# legacy routing is also short-circuited (no protocol version, Warp term)
+SUB_LEGACY_OUT=$(echo "$SUB_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$SUB_TTY" \
+    bash "$HOOK_DIR/on-stop.sh" 2>/dev/null)
+assert_eq "subagent stop skips legacy fallback" "" "$SUB_LEGACY_OUT"
+
+# the main agent's stop (no agent_id) still notifies and stops the spinner
+MAIN_OUT=$(echo "$MAIN_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$SUB_TTY" \
+    WARP_CLI_AGENT_PROTOCOL_VERSION=1 WARP_CLIENT_VERSION="v0.2026.04.01.08.00.stable_00" \
+    CLAUDE_CODE_VERSION="2.1.141" bash "$HOOK_DIR/on-stop.sh" 2>/dev/null)
+echo "$MAIN_OUT" | jq -r '.terminalSequence // empty' | grep -q '"event":"stop"'
+assert_eq "main stop still notifies" "0" "$?"
+sleep 0.4
+[ -n "$SUB_SPID" ] && kill -0 "$SUB_SPID" 2>/dev/null
+assert_eq "main stop kills the spinner" "1" "$?"
+
 # opt-out is honored end to end
 echo "$HOOK_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$HOOK_TTY" \
     WARP_CLAUDE_DYNAMIC_TITLE=0 bash "$HOOK_DIR/on-prompt-submit.sh" >/dev/null 2>&1

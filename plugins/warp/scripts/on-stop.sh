@@ -7,6 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Read hook input from stdin
 INPUT=$(cat)
 
+# Subagent turns fire this Stop hook too; their input carries agent_id
+# (the main agent's never does). A subagent finishing must not notify the
+# user or clear the tab-title spinner — the main agent is still working.
+if [ -n "$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)" ]; then
+    exit 0
+fi
+
 # Clear the tab-title spinner; Claude is done (no-op outside Warp).
 source "$SCRIPT_DIR/title.sh"
 title_on_idle "$INPUT"
