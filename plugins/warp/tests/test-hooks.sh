@@ -336,6 +336,46 @@ assert_eq "writes osc0 to tty" "$(printf '\033]0;proj\007')" "$(cat "$TITLE_TEST
 WARP_TITLE_TTY="$TITLE_TEST_DIR/no/such/dir/tty" title_set "proj"
 assert_eq "unwritable tty is silent no-op" "0" "$?"
 
+echo ""
+echo "--- title-spinner.sh daemon ---"
+
+SPINNER="$SCRIPT_DIR/title-spinner.sh"
+
+# Writes animated frames while the watched pid is alive
+SPIN_OUT="$TITLE_TEST_DIR/spin-tty"
+SPIN_PIDF="$TITLE_TEST_DIR/spin.pid"
+sleep 5 & SPIN_WATCH=$!
+bash "$SPINNER" "proj" "$SPIN_WATCH" "$SPIN_PIDF" >> "$SPIN_OUT" 2>/dev/null &
+SPIN_PID=$!
+sleep 0.6
+grep -q '⠋ proj' "$SPIN_OUT"
+assert_eq "spinner frame written" "0" "$?"
+grep -q '⠙ proj' "$SPIN_OUT"
+assert_eq "frames advance" "0" "$?"
+assert_eq "pid file holds daemon pid" "$SPIN_PID" "$(cat "$SPIN_PIDF")"
+
+# Loses pid-file ownership → exits without touching the title further
+echo "99999" > "$SPIN_PIDF"
+sleep 0.5
+kill -0 "$SPIN_PID" 2>/dev/null
+assert_eq "daemon exits on ownership loss" "1" "$?"
+assert_eq "usurped pid file left alone" "99999" "$(cat "$SPIN_PIDF")"
+kill "$SPIN_WATCH" 2>/dev/null
+
+# Watched pid dies → daemon restores plain title and removes its pid file
+SPIN_OUT2="$TITLE_TEST_DIR/spin-tty2"
+SPIN_PIDF2="$TITLE_TEST_DIR/spin2.pid"
+sleep 0.3 & SPIN_WATCH2=$!
+bash "$SPINNER" "proj" "$SPIN_WATCH2" "$SPIN_PIDF2" >> "$SPIN_OUT2" 2>/dev/null &
+SPIN_PID2=$!
+sleep 1.2
+kill -0 "$SPIN_PID2" 2>/dev/null
+assert_eq "daemon exits when watched pid dies" "1" "$?"
+grep -q "$(printf '\033]0;proj\007')" "$SPIN_OUT2"
+assert_eq "plain title restored on watch death" "0" "$?"
+[ -f "$SPIN_PIDF2" ]
+assert_eq "pid file removed on watch death" "1" "$?"
+
 # --- Summary ---
 
 echo ""
