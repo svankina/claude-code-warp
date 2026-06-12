@@ -17,6 +17,7 @@ source "$SCRIPT_DIR/should-use-structured.sh"
 if ! should_use_structured; then
     if [ "$TERM_PROGRAM" = "WarpTerminal" ]; then
         printf '%s' "$INPUT" | "$SCRIPT_DIR/legacy/on-stop.sh"
+        exit $?
     fi
     exit 0
 fi
