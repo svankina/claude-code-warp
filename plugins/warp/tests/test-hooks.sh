@@ -361,6 +361,7 @@ kill -0 "$SPIN_PID" 2>/dev/null
 assert_eq "daemon exits on ownership loss" "1" "$?"
 assert_eq "usurped pid file left alone" "99999" "$(cat "$SPIN_PIDF")"
 kill "$SPIN_WATCH" 2>/dev/null
+wait "$SPIN_PID" "$SPIN_WATCH" 2>/dev/null || true
 
 # Watched pid dies → daemon restores plain title and removes its pid file
 SPIN_OUT2="$TITLE_TEST_DIR/spin-tty2"
@@ -375,6 +376,7 @@ grep -q "$(printf '\033]0;proj\007')" "$SPIN_OUT2"
 assert_eq "plain title restored on watch death" "0" "$?"
 [ -f "$SPIN_PIDF2" ]
 assert_eq "pid file removed on watch death" "1" "$?"
+wait "$SPIN_PID2" "$SPIN_WATCH2" 2>/dev/null || true
 
 # --- Summary ---
 
