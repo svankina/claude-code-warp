@@ -487,6 +487,51 @@ assert_eq "race leaves no pid file" "1" "$?"
 unset WARP_TITLE_TTY
 unset TERM_PROGRAM
 
+echo ""
+echo "--- Hook-level title integration ---"
+
+HOOK_TTY="$TITLE_TEST_DIR/hook-tty"
+HOOK_INPUT='{"session_id":"hook-title-1","cwd":"/tmp/proj"}'
+HOOK_PIDF=$(_title_pid_file "hook-title-1")
+
+# prompt-submit on legacy Warp (no protocol version) still starts the spinner
+echo "$HOOK_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$HOOK_TTY" \
+    bash "$HOOK_DIR/on-prompt-submit.sh" >/dev/null 2>&1
+sleep 0.6
+HOOK_SPID=$(cat "$HOOK_PIDF" 2>/dev/null)
+[ -n "$HOOK_SPID" ] && kill -0 "$HOOK_SPID" 2>/dev/null
+assert_eq "prompt-submit starts spinner" "0" "$?"
+grep -q '⠋ proj' "$HOOK_TTY"
+assert_eq "spinner output reached the hook tty" "0" "$?"
+
+# stop kills it and leaves a plain title
+echo "$HOOK_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$HOOK_TTY" \
+    bash "$HOOK_DIR/on-stop.sh" >/dev/null 2>&1
+sleep 0.4
+kill -0 "$HOOK_SPID" 2>/dev/null
+assert_eq "stop kills the spinner" "1" "$?"
+grep -q "$(printf '\033]0;proj\007')" "$HOOK_TTY"
+assert_eq "stop writes plain title" "0" "$?"
+
+# permission-request leaves the attention marker
+echo "$HOOK_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$HOOK_TTY" \
+    bash "$HOOK_DIR/on-prompt-submit.sh" >/dev/null 2>&1
+sleep 0.4
+echo "$HOOK_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$HOOK_TTY" \
+    bash "$HOOK_DIR/on-permission-request.sh" >/dev/null 2>&1
+sleep 0.4
+grep -q '● proj' "$HOOK_TTY"
+assert_eq "permission-request writes attention marker" "0" "$?"
+[ -f "$HOOK_PIDF" ]
+assert_eq "permission-request removes pid file" "1" "$?"
+
+# opt-out is honored end to end
+echo "$HOOK_INPUT" | TERM_PROGRAM=WarpTerminal WARP_TITLE_TTY="$HOOK_TTY" \
+    WARP_CLAUDE_DYNAMIC_TITLE=0 bash "$HOOK_DIR/on-prompt-submit.sh" >/dev/null 2>&1
+sleep 0.4
+[ -f "$HOOK_PIDF" ]
+assert_eq "opt-out: no spinner from hooks" "1" "$?"
+
 # --- Summary ---
 
 echo ""

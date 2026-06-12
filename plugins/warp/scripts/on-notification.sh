@@ -3,18 +3,25 @@
 # Sends a structured Warp notification when Claude has been idle
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Read hook input from stdin
+INPUT=$(cat)
+
+# Show the attention marker in the tab title (no-op outside Warp).
+source "$SCRIPT_DIR/title.sh"
+title_on_blocked "$INPUT"
+
 source "$SCRIPT_DIR/should-use-structured.sh"
 
-# Legacy fallback for old Warp versions
+# Legacy fallback for old Warp versions (stdin already consumed — pipe it)
 if ! should_use_structured; then
-    [ "$TERM_PROGRAM" = "WarpTerminal" ] && exec "$SCRIPT_DIR/legacy/on-notification.sh"
+    if [ "$TERM_PROGRAM" = "WarpTerminal" ]; then
+        printf '%s' "$INPUT" | "$SCRIPT_DIR/legacy/on-notification.sh"
+    fi
     exit 0
 fi
 
 source "$SCRIPT_DIR/build-payload.sh"
-
-# Read hook input from stdin
-INPUT=$(cat)
 
 # Extract notification-specific fields
 NOTIF_TYPE=$(echo "$INPUT" | jq -r '.notification_type // "unknown"' 2>/dev/null)

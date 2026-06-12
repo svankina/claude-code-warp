@@ -4,6 +4,14 @@
 # transitioning the session status from Blocked back to Running.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Read hook input from stdin
+INPUT=$(cat)
+
+# Keep the tab-title spinner alive (restarts it after a permission grant).
+source "$SCRIPT_DIR/title.sh"
+title_on_tool_done "$INPUT"
+
 source "$SCRIPT_DIR/should-use-structured.sh"
 
 # No legacy equivalent for this hook
@@ -12,9 +20,6 @@ if ! should_use_structured; then
 fi
 
 source "$SCRIPT_DIR/build-payload.sh"
-
-# Read hook input from stdin
-INPUT=$(cat)
 
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 

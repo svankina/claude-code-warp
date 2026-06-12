@@ -3,6 +3,14 @@
 # Sends a structured Warp notification when Claude needs permission to run a tool
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Read hook input from stdin
+INPUT=$(cat)
+
+# Show the attention marker in the tab title (no-op outside Warp).
+source "$SCRIPT_DIR/title.sh"
+title_on_blocked "$INPUT"
+
 source "$SCRIPT_DIR/should-use-structured.sh"
 
 # No legacy equivalent for this hook
@@ -11,9 +19,6 @@ if ! should_use_structured; then
 fi
 
 source "$SCRIPT_DIR/build-payload.sh"
-
-# Read hook input from stdin
-INPUT=$(cat)
 
 # Extract permission-request-specific fields
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // "unknown"' 2>/dev/null)

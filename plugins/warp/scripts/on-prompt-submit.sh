@@ -4,6 +4,14 @@
 # transitioning the session status from idle/blocked back to running.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Read hook input from stdin
+INPUT=$(cat)
+
+# Animate the tab title while Claude works (no-op outside Warp).
+source "$SCRIPT_DIR/title.sh"
+title_on_working "$INPUT"
+
 source "$SCRIPT_DIR/should-use-structured.sh"
 
 # No legacy equivalent for this hook
@@ -12,9 +20,6 @@ if ! should_use_structured; then
 fi
 
 source "$SCRIPT_DIR/build-payload.sh"
-
-# Read hook input from stdin
-INPUT=$(cat)
 
 # Extract the user's prompt
 QUERY=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null)

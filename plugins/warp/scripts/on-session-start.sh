@@ -5,6 +5,13 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/should-use-structured.sh"
 
+# Read hook input from stdin
+INPUT=$(cat)
+
+# Reset the tab title; clears any spinner left over from a previous session.
+source "$SCRIPT_DIR/title.sh"
+title_on_idle "$INPUT"
+
 # Legacy fallback for old Warp versions
 if ! should_use_structured; then
     exec "$SCRIPT_DIR/legacy/on-session-start.sh"
@@ -19,9 +26,6 @@ EOF
     exit 0
 fi
 source "$SCRIPT_DIR/build-payload.sh"
-
-# Read hook input from stdin
-INPUT=$(cat)
 
 # Best-effort Claude Code version detection.
 # Cache in $CLAUDE_ENV_FILE so subsequent hooks can skip the lookup, and

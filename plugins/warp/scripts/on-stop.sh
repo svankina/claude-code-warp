@@ -3,18 +3,25 @@
 # Sends a structured Warp notification when Claude completes a task
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Read hook input from stdin
+INPUT=$(cat)
+
+# Clear the tab-title spinner; Claude is done (no-op outside Warp).
+source "$SCRIPT_DIR/title.sh"
+title_on_idle "$INPUT"
+
 source "$SCRIPT_DIR/should-use-structured.sh"
 
-# Legacy fallback for old Warp versions
+# Legacy fallback for old Warp versions (stdin already consumed — pipe it)
 if ! should_use_structured; then
-    [ "$TERM_PROGRAM" = "WarpTerminal" ] && exec "$SCRIPT_DIR/legacy/on-stop.sh"
+    if [ "$TERM_PROGRAM" = "WarpTerminal" ]; then
+        printf '%s' "$INPUT" | "$SCRIPT_DIR/legacy/on-stop.sh"
+    fi
     exit 0
 fi
 
 source "$SCRIPT_DIR/build-payload.sh"
-
-# Read hook input from stdin
-INPUT=$(cat)
 
 # Skip if a stop hook is already active (prevents double-notification)
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
