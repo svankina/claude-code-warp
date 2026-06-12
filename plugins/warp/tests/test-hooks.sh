@@ -400,9 +400,18 @@ cat > "$SHELL_HOST" <<HOST_EOF
 echo "\$\$"
 bash "$TITLE_PROBE"
 HOST_EOF
-HOST_OUT=$(bash "$SHELL_HOST")
-[ "$(echo "$HOST_OUT" | head -1)" = "$(echo "$HOST_OUT" | tail -1)" ]
-assert_eq "shell wrapper with claude in path is not matched" "1" "$?"
+OUTER_HOST="$TITLE_TEST_DIR/outer.sh"
+cat > "$OUTER_HOST" <<OUTER_EOF
+echo "\$\$"
+bash "$SHELL_HOST"
+OUTER_EOF
+TREE_OUT=$("$TITLE_TEST_DIR/claude-fake" "$OUTER_HOST")
+TREE_A=$(echo "$TREE_OUT" | sed -n 1p)
+TREE_B=$(echo "$TREE_OUT" | sed -n 2p)
+TREE_RESULT=$(echo "$TREE_OUT" | sed -n 3p)
+assert_eq "skips shell wrapper, selects claude ancestor" "$TREE_A" "$TREE_RESULT"
+[ "$TREE_RESULT" = "$TREE_B" ]
+assert_eq "shell wrapper itself is not selected" "1" "$?"
 
 echo ""
 echo "--- spinner lifecycle ---"
@@ -467,6 +476,8 @@ export TERM_PROGRAM=WarpTerminal
 export WARP_TITLE_TTY="$TITLE_TEST_DIR/race-tty"
 title_on_working "$RACE_INPUT"
 RACE_PID=$(cat "$RACE_PIDF" 2>/dev/null)
+[ -n "$RACE_PID" ]
+assert_eq "race spinner published its pid" "0" "$?"
 title_on_blocked "$RACE_INPUT"
 sleep 0.5
 [ -n "$RACE_PID" ] && kill -0 "$RACE_PID" 2>/dev/null
