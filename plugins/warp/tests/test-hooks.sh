@@ -381,20 +381,28 @@ wait "$SPIN_PID2" "$SPIN_WATCH2" 2>/dev/null || true
 echo ""
 echo "--- _title_claude_pid ---"
 
-# A probe run under a parent whose command line contains "claude" must return
-# that parent's pid (the ancestor walk), not its immediate $PPID blindly.
 TITLE_PROBE="$TITLE_TEST_DIR/probe.sh"
 cat > "$TITLE_PROBE" <<PROBE_EOF
 source "$SCRIPT_DIR/title.sh"
 _title_claude_pid
 PROBE_EOF
-TITLE_HOST="$TITLE_TEST_DIR/fake-claude-host.sh"
+ln -sf /bin/bash "$TITLE_TEST_DIR/claude-fake"
+TITLE_HOST="$TITLE_TEST_DIR/host.sh"
 cat > "$TITLE_HOST" <<HOST_EOF
 echo "\$\$"
 bash "$TITLE_PROBE"
 HOST_EOF
-HOST_OUT=$(bash "$TITLE_HOST")
-assert_eq "finds claude ancestor" "$(echo "$HOST_OUT" | head -1)" "$(echo "$HOST_OUT" | tail -1)"
+HOST_OUT=$("$TITLE_TEST_DIR/claude-fake" "$TITLE_HOST")
+assert_eq "finds claude-named ancestor by comm" "$(echo "$HOST_OUT" | head -1)" "$(echo "$HOST_OUT" | tail -1)"
+
+SHELL_HOST="$TITLE_TEST_DIR/claude-wrapper.sh"
+cat > "$SHELL_HOST" <<HOST_EOF
+echo "\$\$"
+bash "$TITLE_PROBE"
+HOST_EOF
+HOST_OUT=$(bash "$SHELL_HOST")
+[ "$(echo "$HOST_OUT" | head -1)" = "$(echo "$HOST_OUT" | tail -1)" ]
+assert_eq "shell wrapper with claude in path is not matched" "1" "$?"
 
 echo ""
 echo "--- spinner lifecycle ---"
@@ -450,6 +458,21 @@ sleep 0.4
 [ -f "$LIFE_PIDF" ]
 assert_eq "opt-out spawns nothing" "1" "$?"
 
+unset WARP_TITLE_TTY
+unset TERM_PROGRAM
+
+RACE_INPUT='{"session_id":"title-race-1","cwd":"/tmp/proj"}'
+RACE_PIDF=$(_title_pid_file "title-race-1")
+export TERM_PROGRAM=WarpTerminal
+export WARP_TITLE_TTY="$TITLE_TEST_DIR/race-tty"
+title_on_working "$RACE_INPUT"
+RACE_PID=$(cat "$RACE_PIDF" 2>/dev/null)
+title_on_blocked "$RACE_INPUT"
+sleep 0.5
+[ -n "$RACE_PID" ] && kill -0 "$RACE_PID" 2>/dev/null
+assert_eq "immediate stop kills just-started spinner" "1" "$?"
+[ -f "$RACE_PIDF" ]
+assert_eq "race leaves no pid file" "1" "$?"
 unset WARP_TITLE_TTY
 unset TERM_PROGRAM
 

@@ -84,14 +84,21 @@ _title_spinner_pid() {
 }
 
 # Find the Claude process for the spinner to watch: the nearest ancestor whose
-# command line mentions "claude". Hooks may run under a short-lived
-# intermediate shell, so bare $PPID could die the moment the hook exits and
-# take the spinner with it. Falls back to $PPID when nothing matches.
+# process name starts with "claude", or whose non-shell command line mentions
+# "claude". Hooks may run under a short-lived intermediate shell from a
+# .claude/plugins path, so shell args are intentionally ignored. Falls back to
+# $PPID when nothing matches.
 _title_claude_pid() {
-    local pid=$$ args _i
+    local pid=$$ args comm _i
     for _i in 1 2 3 4 5 6 7 8; do
         pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
         case "$pid" in '' | 0 | 1) break ;; esac
+        comm=$(ps -o comm= -p "$pid" 2>/dev/null)
+        comm=${comm##*/}
+        case "$comm" in
+            claude*) printf '%s' "$pid"; return 0 ;;
+            bash | sh | zsh | dash | fish) continue ;;
+        esac
         args=$(ps -o args= -p "$pid" 2>/dev/null)
         case "$args" in
             *claude*) printf '%s' "$pid"; return 0 ;;
@@ -115,6 +122,13 @@ title_spinner_start() {
     # inside the subshell and no daemon is spawned — exactly the desired no-op.
     ( "$_TITLE_SCRIPT_DIR/title-spinner.sh" "$base" "$(_title_claude_pid)" "$pidfile" \
         >> "$(_title_tty)" < /dev/null 2>/dev/null & ) 2>/dev/null
+    # Wait briefly for the daemon to publish its pid so a stop event that
+    # fires right after this start can always find and kill it.
+    local _i
+    for _i in $(seq 1 20); do
+        [ -f "$pidfile" ] && break
+        sleep 0.01
+    done
     return 0
 }
 
