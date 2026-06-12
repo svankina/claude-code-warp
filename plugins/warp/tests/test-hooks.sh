@@ -378,6 +378,81 @@ assert_eq "plain title restored on watch death" "0" "$?"
 assert_eq "pid file removed on watch death" "1" "$?"
 wait "$SPIN_PID2" "$SPIN_WATCH2" 2>/dev/null || true
 
+echo ""
+echo "--- _title_claude_pid ---"
+
+# A probe run under a parent whose command line contains "claude" must return
+# that parent's pid (the ancestor walk), not its immediate $PPID blindly.
+TITLE_PROBE="$TITLE_TEST_DIR/probe.sh"
+cat > "$TITLE_PROBE" <<PROBE_EOF
+source "$SCRIPT_DIR/title.sh"
+_title_claude_pid
+PROBE_EOF
+TITLE_HOST="$TITLE_TEST_DIR/fake-claude-host.sh"
+cat > "$TITLE_HOST" <<HOST_EOF
+echo "\$\$"
+bash "$TITLE_PROBE"
+HOST_EOF
+HOST_OUT=$(bash "$TITLE_HOST")
+assert_eq "finds claude ancestor" "$(echo "$HOST_OUT" | head -1)" "$(echo "$HOST_OUT" | tail -1)"
+
+echo ""
+echo "--- spinner lifecycle ---"
+
+LIFE_TTY="$TITLE_TEST_DIR/life-tty"
+LIFE_INPUT='{"session_id":"title-life-1","cwd":"/tmp/proj"}'
+LIFE_PIDF=$(_title_pid_file "title-life-1")
+export TERM_PROGRAM=WarpTerminal
+export WARP_TITLE_TTY="$LIFE_TTY"
+
+# working → spinner starts
+title_on_working "$LIFE_INPUT"
+sleep 0.6
+LIFE_PID=$(cat "$LIFE_PIDF" 2>/dev/null)
+[ -n "$LIFE_PID" ] && kill -0 "$LIFE_PID" 2>/dev/null
+assert_eq "working starts a live spinner" "0" "$?"
+grep -q '⠋ proj' "$LIFE_TTY"
+assert_eq "spinner animates the base title" "0" "$?"
+
+# tool_done while running → same daemon (ensure is a no-op)
+title_on_tool_done "$LIFE_INPUT"
+sleep 0.3
+assert_eq "ensure keeps the same daemon" "$LIFE_PID" "$(cat "$LIFE_PIDF" 2>/dev/null)"
+
+# blocked → daemon killed, attention marker written
+title_on_blocked "$LIFE_INPUT"
+sleep 0.4
+kill -0 "$LIFE_PID" 2>/dev/null
+assert_eq "blocked kills the spinner" "1" "$?"
+[ -f "$LIFE_PIDF" ]
+assert_eq "blocked removes the pid file" "1" "$?"
+grep -q '● proj' "$LIFE_TTY"
+assert_eq "blocked writes attention marker" "0" "$?"
+
+# tool_done while stopped → spinner restarts (post-permission-grant path)
+title_on_tool_done "$LIFE_INPUT"
+sleep 0.6
+LIFE_PID2=$(cat "$LIFE_PIDF" 2>/dev/null)
+[ -n "$LIFE_PID2" ] && kill -0 "$LIFE_PID2" 2>/dev/null
+assert_eq "tool_done restarts spinner after blocked" "0" "$?"
+
+# idle → daemon killed, plain title written
+title_on_idle "$LIFE_INPUT"
+sleep 0.4
+kill -0 "$LIFE_PID2" 2>/dev/null
+assert_eq "idle kills the spinner" "1" "$?"
+grep -q "$(printf '\033]0;proj\007')" "$LIFE_TTY"
+assert_eq "idle writes plain title" "0" "$?"
+
+# disabled → no spinner at all
+WARP_CLAUDE_DYNAMIC_TITLE=0 title_on_working "$LIFE_INPUT"
+sleep 0.4
+[ -f "$LIFE_PIDF" ]
+assert_eq "opt-out spawns nothing" "1" "$?"
+
+unset WARP_TITLE_TTY
+unset TERM_PROGRAM
+
 # --- Summary ---
 
 echo ""
