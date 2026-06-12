@@ -109,23 +109,26 @@ _title_claude_pid() {
 
 title_spinner_start() {
     local session_id="${1:-}" base="${2:-}"
-    local pidfile oldpid
+    local pidfile oldpid tty watch_pid _i
     pidfile=$(_title_pid_file "$session_id")
     mkdir -p "$TITLE_STATE_DIR" 2>/dev/null || return 0
     if oldpid=$(_title_spinner_pid "$pidfile"); then
         kill "$oldpid" 2>/dev/null
     fi
     rm -f "$pidfile" 2>/dev/null
+    tty=$(_title_tty)
+    # No usable tty -> no spinner; bail before paying the spawn + wait cost.
+    ( : >> "$tty" ) 2>/dev/null || return 0
+    # Resolve the watch pid here, not inside the fork: the daemon then starts
+    # and publishes its pid file within milliseconds of the spawn.
+    watch_pid=$(_title_claude_pid)
     # Double-fork so the daemon is orphaned immediately and survives this
-    # hook's exit (setsid is not portable to macOS). The tty is opened here,
-    # pre-detach; if there is no controlling terminal the redirection fails
-    # inside the subshell and no daemon is spawned — exactly the desired no-op.
-    ( "$_TITLE_SCRIPT_DIR/title-spinner.sh" "$base" "$(_title_claude_pid)" "$pidfile" \
-        >> "$(_title_tty)" < /dev/null 2>/dev/null & ) 2>/dev/null
+    # hook's exit (setsid is not portable to macOS).
+    ( "$_TITLE_SCRIPT_DIR/title-spinner.sh" "$base" "$watch_pid" "$pidfile" \
+        >> "$tty" < /dev/null 2>/dev/null & ) 2>/dev/null
     # Wait briefly for the daemon to publish its pid so a stop event that
     # fires right after this start can always find and kill it.
-    local _i
-    for _i in $(seq 1 20); do
+    for _i in $(seq 1 100); do
         [ -f "$pidfile" ] && break
         sleep 0.01
     done
