@@ -287,6 +287,54 @@ for HOOK in on-permission-request.sh on-prompt-submit.sh on-post-tool-use.sh; do
     assert_eq "$HOOK exits 0 without protocol version" "0" "$?"
 done
 
+echo ""
+echo "=== title.sh ==="
+
+source "$SCRIPT_DIR/title.sh"
+
+echo ""
+echo "--- title_format_osc0 ---"
+assert_eq "osc0 format" "$(printf '\033]0;hello\007')" "$(title_format_osc0 'hello')"
+
+echo ""
+echo "--- title_base ---"
+assert_eq "basename of cwd" "my-project" "$(title_base '{"cwd":"/Users/alice/my-project"}')"
+assert_eq "falls back to PWD basename" "$(basename "$PWD")" "$(title_base '{}')"
+assert_eq "falls back on invalid json" "$(basename "$PWD")" "$(title_base 'not json')"
+
+echo ""
+echo "--- _title_session_id ---"
+assert_eq "extracts session id" "sess-9" "$(_title_session_id '{"session_id":"sess-9"}')"
+assert_eq "missing id falls back" "nosession" "$(_title_session_id '{}')"
+
+echo ""
+echo "--- _title_pid_file ---"
+assert_eq "pid file path" "${TMPDIR:-/tmp}/.warp-claude-title/sess-123.pid" "$(_title_pid_file 'sess-123')"
+assert_eq "sanitizes unsafe chars" "${TMPDIR:-/tmp}/.warp-claude-title/a_b_c.pid" "$(_title_pid_file 'a/b:c')"
+
+echo ""
+echo "--- title_enabled ---"
+( unset TERM_PROGRAM WARP_CLI_AGENT_PROTOCOL_VERSION WARP_CLAUDE_DYNAMIC_TITLE 2>/dev/null
+  title_enabled )
+assert_eq "disabled outside Warp" "1" "$?"
+( unset WARP_CLI_AGENT_PROTOCOL_VERSION WARP_CLAUDE_DYNAMIC_TITLE 2>/dev/null
+  TERM_PROGRAM=WarpTerminal title_enabled )
+assert_eq "enabled via TERM_PROGRAM" "0" "$?"
+( unset TERM_PROGRAM WARP_CLAUDE_DYNAMIC_TITLE 2>/dev/null
+  WARP_CLI_AGENT_PROTOCOL_VERSION=2 title_enabled )
+assert_eq "enabled via protocol version" "0" "$?"
+( unset WARP_CLI_AGENT_PROTOCOL_VERSION 2>/dev/null
+  TERM_PROGRAM=WarpTerminal WARP_CLAUDE_DYNAMIC_TITLE=0 title_enabled )
+assert_eq "opt-out wins" "1" "$?"
+
+echo ""
+echo "--- title_set ---"
+TITLE_TEST_DIR=$(mktemp -d)
+WARP_TITLE_TTY="$TITLE_TEST_DIR/tty" title_set "proj"
+assert_eq "writes osc0 to tty" "$(printf '\033]0;proj\007')" "$(cat "$TITLE_TEST_DIR/tty")"
+WARP_TITLE_TTY="$TITLE_TEST_DIR/no/such/dir/tty" title_set "proj"
+assert_eq "unwritable tty is silent no-op" "0" "$?"
+
 # --- Summary ---
 
 echo ""
