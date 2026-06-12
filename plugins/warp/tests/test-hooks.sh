@@ -301,6 +301,7 @@ echo "--- title_base ---"
 assert_eq "basename of cwd" "my-project" "$(title_base '{"cwd":"/Users/alice/my-project"}')"
 assert_eq "falls back to PWD basename" "$(basename "$PWD")" "$(title_base '{}')"
 assert_eq "falls back on invalid json" "$(basename "$PWD")" "$(title_base 'not json')"
+assert_eq "strips control chars" "evilproj" "$(title_base "{\"cwd\":\"/tmp/evil$(printf '\007\033')proj\"}")"
 
 echo ""
 echo "--- _title_session_id ---"

@@ -5,9 +5,11 @@
 # Blocked: ● project   (static attention marker — Claude needs the user)
 # Idle:    project     (static)
 #
-# Source this file from a hook script, then call one title_on_* wrapper.
-# Everything here is a silent no-op outside Warp, when /dev/tty is
-# unavailable, or when the user opts out with WARP_CLAUDE_DYNAMIC_TITLE=0.
+# Source this file from a hook script, then call one title_on_* wrapper
+# (added with the spinner lifecycle). The wrappers gate on title_enabled, so
+# they are silent no-ops outside Warp or when the user opts out with
+# WARP_CLAUDE_DYNAMIC_TITLE=0; low-level helpers like title_set write
+# unconditionally but never fail the caller (no tty → silent no-op).
 # Titles are plain OSC 0 (not the cli-agent protocol), so they deliberately
 # do NOT gate on should_use_structured — they work on older Warp builds too.
 
@@ -31,9 +33,14 @@ title_base() {
     local cwd=""
     if command -v jq >/dev/null 2>&1; then
         cwd=$(printf '%s' "${1:-}" | jq -r '.cwd // empty' 2>/dev/null)
+        if [ -z "$cwd" ]; then
+            cwd=$(printf '%s' "${1:-}" | tr -d '[\000-\037]' | jq -r '.cwd // empty' 2>/dev/null)
+        fi
     fi
     [ -z "$cwd" ] && cwd="$PWD"
-    basename "$cwd"
+    # Strip C0 control chars: BEL/ESC in a dir name would break the OSC 0
+    # sequence and could inject terminal control sequences.
+    basename "$cwd" | tr -d '[\000-\037]'
 }
 
 _title_session_id() {
